@@ -1,11 +1,13 @@
 import { serve } from "@hono/node-server";
-import { randomUUID } from "crypto";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 
 import { generator } from "@/generator";
-import type { EntityField } from "./types";
+import type { EntityField } from "@/types";
 
 const app = new Hono();
+
+app.get("/assets/*", serveStatic({ root: "./src" }));
 
 app.get("/api/:entity", (c) => {
   const { entity } = c.req.param();
@@ -30,15 +32,17 @@ app.get("/api/:entity", (c) => {
 
     if (fields) {
       fields.split(",").forEach((field) => {
-        if (field === "id") {
-          item.id = idType === "uuid" ? randomUUID() : i + 1;
+        if (field === "id" && idType === "serial") {
+          item.id = i + 1;
         } else if (data[field] !== undefined) {
           item[field] = data[field];
         }
       });
     } else {
       Object.assign(item, data);
-      item.id = idType === "uuid" ? randomUUID() : i + 1;
+      if (idType === "serial") {
+        item.id = i + 1;
+      }
     }
 
     return item;
@@ -47,12 +51,7 @@ app.get("/api/:entity", (c) => {
   return c.json(items);
 });
 
-serve(
-  {
-    fetch: app.fetch,
-    port: 5000,
-  },
-  (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
-  }
-);
+serve({ fetch: app.fetch, port: 5001 }, (info) => {
+  const address = info.address === "::" ? `http://localhost:${info.port}` : info.address;
+  console.log(`Server is running on ${address}`);
+});
