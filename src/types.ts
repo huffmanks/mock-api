@@ -3,20 +3,21 @@ export type User = EntityField & {
   firstName: string;
   lastName: string;
   name: string;
-  email: string;
   username: string;
+  email: string;
   phoneNumber: string;
   userAgent: string;
   birthDate: string;
   ssn: string;
-  gender: string;
   role: UserRole;
-  shirtSize: string;
+  gender: string;
+  race: string;
   hairColor: string;
   eyeColor: string;
   height: number;
   weight: number;
-  race: string;
+  image: string;
+  shirtSize: string;
   university: string;
   creditCard: {
     number: string;
