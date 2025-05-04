@@ -42,8 +42,9 @@ export type User = EntityField & {
 export type Product = EntityField & {
   id: string;
   title: string;
+  slug: string;
   description: string;
-  category: string;
+  category: "desktop" | "headphone" | "laptop" | "phone" | "speaker" | "tablet" | "tv" | "watch";
   price: number;
   quantity: number;
   brand: string;
@@ -56,10 +57,19 @@ export type Product = EntityField & {
     height: number;
     depth: number;
   };
-  releaseDate: number;
-  warranty: string;
+  releaseDate: string;
+  warranty: number | null;
   barcode: string;
-  image: string;
+  images: {
+    landscape: {
+      png: string;
+      webp: string;
+    };
+    square: {
+      png: string;
+      webp: string;
+    };
+  };
 };
 
 export type EntityField = {
