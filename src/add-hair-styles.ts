@@ -35,10 +35,11 @@ export type UserWithHairStyle = User & {
 type StyleResult = {
   id: string;
   hairStyle: string;
+  hairColor?: string;
 };
 
 const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
-const MODEL_NAME = "qwen3.5:4b";
+const MODEL_NAME = "gemma4:e4b";
 const BATCH_SIZE = 15;
 
 function calculateAge(birthDateStr?: string): number {
@@ -49,6 +50,26 @@ function calculateAge(birthDateStr?: string): number {
   const m = now.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
   return isNaN(age) ? 30 : age;
+}
+
+function assembleEnrichedUser(user: User, hairStyle: string, newHairColor?: string): UserWithHairStyle {
+  const result: Record<string, any> = {};
+  const finalHairColor = newHairColor && newHairColor.trim() !== "" ? newHairColor : user.hairColor;
+
+  for (const key of Object.keys(user)) {
+    if (key === "hairColor") {
+      result["hairColor"] = finalHairColor;
+      result["hairStyle"] = hairStyle.replace(/\.$/, "").trim();
+    } else {
+      result[key] = (user as Record<string, any>)[key];
+    }
+  }
+
+  if (!("hairStyle" in result)) {
+    result["hairStyle"] = hairStyle.replace(/\.$/, "").trim();
+  }
+
+  return result as UserWithHairStyle;
 }
 
 function insertHairStyleInOrder(user: User, hairStyle: string): UserWithHairStyle {
@@ -65,7 +86,7 @@ function insertHairStyleInOrder(user: User, hairStyle: string): UserWithHairStyl
   return result as UserWithHairStyle;
 }
 
-async function getHairStylesFromOllama(usersBatch: User[]): Promise<Record<string, string>> {
+async function getHairStylesFromOllama(usersBatch: User[]): Promise<Record<string, StyleResult>> {
   const batchPromptData = usersBatch.map((u) => ({
     id: u.id,
     gender: u.gender,
@@ -76,16 +97,38 @@ async function getHairStylesFromOllama(usersBatch: User[]): Promise<Record<strin
   }));
 
   const systemPrompt = `You are a realistic hair stylist and demographic consultant.
-Analyze each user profile and generate a realistic hairStyle description under 8 words.
-CRITICAL: Describe ONLY the cut, length, texture, or arrangement. NEVER include any hair color words (e.g., brown, blonde, black, red, gray, salt-and-pepper).
+Analyze each user profile and perform two actions:
+1. Generate a realistic "hairStyle" description (under 8 words). Do NOT end the description with a period.
+2. Evaluate "hairColor". If the provided color is realistic for the demographic (age, race, gender), keep "hairColor" identical. If unrealistic, provide a corrected natural hair color.
 
-Return a JSON object containing a "styles" array with objects having "id" and "hairStyle" properties.`;
+STRICT RULES FOR hairStyle:
+- Describe ONLY the cut, length, texture, or arrangement.
+- NEVER include color terms in the hairStyle string.`;
 
   const response = await fetch(OLLAMA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: MODEL_NAME,
+      keep_alive: "10m",
+      format: {
+        type: "object",
+        properties: {
+          profiles: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                hairStyle: { type: "string" },
+                hairColor: { type: "string" },
+              },
+              required: ["id", "hairStyle", "hairColor"],
+            },
+          },
+        },
+        required: ["profiles"],
+      },
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -95,8 +138,9 @@ Return a JSON object containing a "styles" array with objects having "id" and "h
       ],
       stream: false,
       options: {
-        temperature: 0.7,
-        num_predict: 4096,
+        temperature: 0.3,
+        num_predict: 2048,
+        num_thread: 8,
       },
     }),
   });
@@ -107,29 +151,63 @@ Return a JSON object containing a "styles" array with objects having "id" and "h
   }
 
   const data = (await response.json()) as { message?: { content?: string } };
-  let rawText = data.message?.content?.trim() || "";
+  const rawText = data.message?.content?.trim() || "";
 
-  rawText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const parsed = JSON.parse(rawText);
+  const resultsArray: StyleResult[] = parsed.profiles || [];
 
-  const arrayMatch = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-  if (!arrayMatch) {
-    console.error("\n⚠️ [DEBUG] Raw output from model:\n", data.message?.content);
-    throw new Error("Could not locate a valid JSON array in model output.");
-  }
-
-  const parsedResults: StyleResult[] = JSON.parse(arrayMatch[0]);
-  const styleMap: Record<string, string> = {};
-
-  if (Array.isArray(parsedResults)) {
-    for (const item of parsedResults) {
-      if (item?.id && item?.hairStyle) {
-        styleMap[item.id] = item.hairStyle;
-      }
+  const styleMap: Record<string, StyleResult> = {};
+  for (const item of resultsArray) {
+    if (item?.id && item?.hairStyle) {
+      styleMap[item.id] = item;
     }
   }
 
   return styleMap;
 }
+
+// async function processUsers() {
+//   console.log(`🚀 Enriching dataset using local model: ${MODEL_NAME}\n`);
+
+//   const inputFile = path.resolve(process.cwd(), "users.json");
+//   const outputFile = path.resolve(process.cwd(), "users_enriched.json");
+
+//   if (!fs.existsSync(inputFile)) {
+//     console.error(`❌ Input file not found: ${inputFile}`);
+//     process.exit(1);
+//   }
+
+//   const users: User[] = JSON.parse(fs.readFileSync(inputFile, "utf-8"));
+//   console.log(`📂 Loaded ${users.length} users. Processing in batches of ${BATCH_SIZE}...\n`);
+
+//   const enrichedUsers: UserWithHairStyle[] = [];
+//   const totalBatches = Math.ceil(users.length / BATCH_SIZE);
+
+//   for (let i = 0; i < users.length; i += BATCH_SIZE) {
+//     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+//     const chunk = users.slice(i, i + BATCH_SIZE);
+
+//     console.log(`⏳ Processing batch ${batchNum}/${totalBatches}...`);
+
+//     try {
+//       const hairStyleMap = await getHairStylesFromOllama(chunk);
+
+//       for (const user of chunk) {
+//         const assignedStyle = hairStyleMap[user.id] || "short neatly parted";
+//         enrichedUsers.push(insertHairStyleInOrder(user, assignedStyle));
+//         console.log(`   └─ [${user.id}] ${user.gender} | ${user.race} | ${user.hairColor} -> "${assignedStyle}"`);
+//       }
+//     } catch (err: any) {
+//       console.error(`❌ Batch ${batchNum} error: ${err.message}`);
+//       for (const user of chunk) {
+//         enrichedUsers.push(insertHairStyleInOrder(user, "short neatly parted"));
+//       }
+//     }
+//   }
+
+//   fs.writeFileSync(outputFile, JSON.stringify(enrichedUsers, null, 2));
+//   console.log(`\n🎉 Done! Saved enriched output copy to: ${outputFile}`);
+// }
 
 async function processUsers() {
   console.log(`🚀 Enriching dataset using local model: ${MODEL_NAME}\n`);
@@ -155,17 +233,22 @@ async function processUsers() {
     console.log(`⏳ Processing batch ${batchNum}/${totalBatches}...`);
 
     try {
-      const hairStyleMap = await getHairStylesFromOllama(chunk);
+      const resultMap = await getHairStylesFromOllama(chunk);
 
       for (const user of chunk) {
-        const assignedStyle = hairStyleMap[user.id] || "short neatly parted";
-        enrichedUsers.push(insertHairStyleInOrder(user, assignedStyle));
-        console.log(`   └─ [${user.id}] ${user.gender} | ${user.race} | ${user.hairColor} -> "${assignedStyle}"`);
+        const result = resultMap[user.id];
+        const assignedStyle = result?.hairStyle || "short neatly parted";
+        const assignedColor = result?.hairColor || user.hairColor;
+
+        enrichedUsers.push(assembleEnrichedUser(user, assignedStyle, assignedColor));
+        console.log(
+          `   └─ [${user.id}] ${user.gender} | ${user.race} | Color: "${assignedColor}" | Style: "${assignedStyle}"`,
+        );
       }
     } catch (err: any) {
       console.error(`❌ Batch ${batchNum} error: ${err.message}`);
       for (const user of chunk) {
-        enrichedUsers.push(insertHairStyleInOrder(user, "short neatly parted"));
+        enrichedUsers.push(assembleEnrichedUser(user, "short neatly parted", user.hairColor));
       }
     }
   }
