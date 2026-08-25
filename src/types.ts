@@ -13,6 +13,7 @@ export type User = EntityField & {
   gender: string;
   race: string;
   hairColor: string;
+  hairStyle: string;
   eyeColor: string;
   height: number;
   weight: number;
@@ -44,7 +45,7 @@ export type Product = EntityField & {
   title: string;
   slug: string;
   description: string;
-  category: "desktop" | "headphone" | "laptop" | "phone" | "speaker" | "tablet" | "tv" | "watch";
+  category: ProductCategory;
   price: number;
   quantity: number;
   brand: string;
@@ -72,10 +73,9 @@ export type Product = EntityField & {
   };
 };
 
-export type EntityField = {
-  [key: string]: any;
-};
+export type EntityField = Record<string, unknown>;
 
 export type Entity = "users" | "products";
 
 export type UserRole = "admin" | "manager" | "member" | "guest";
+export type ProductCategory = "desktop" | "headphone" | "laptop" | "phone" | "speaker" | "tablet" | "tv" | "watch";
